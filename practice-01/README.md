@@ -11,10 +11,10 @@
 ## 2. Окружение
 
 - ОС: Windows 11
-- Node.js: v24.x.x
-- npm: 10.x.x
-- Git: 2.4x.x
-- Браузер: Chrome 1xx
+- Node.js: v24.14.1
+- npm: 11.11.0
+- Git: 2.53.0.windows.2
+- Браузер: Microsoft Edge
 
 ## 3. Запуск
 
