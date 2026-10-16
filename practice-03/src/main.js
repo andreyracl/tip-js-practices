@@ -17,6 +17,19 @@ const initialTasks = isVariant ? variantTasks : demoTasks;
 let currentTasks = initialTasks.map((task) => ({ ...task }));
 let currentFilter = "all";
 
+const FILTERS = new Set(["all", "pending", "completed"]);
+const TASK_ACTIONS = new Set(["toggle", "delete"]);
+
+function showMessage(text = "") {
+  elements.message.textContent = text;
+}
+
+// Идентификатор из DOM — строка; преобразуется и проверяется на границе обработчика.
+function readTaskId(card) {
+  const id = Number(card.dataset.taskId);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 elements.datasetLabel.textContent = isVariant
   ? `Индивидуальный вариант: ${variantNumber ?? "не указан"}`
   : "Общий контрольный набор";
@@ -30,7 +43,7 @@ function renderApp() {
   for (const button of elements.filters.querySelectorAll("button[data-filter]")) {
     const isActive = button.dataset.filter === currentFilter;
     button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    button.setAttribute("aria-pressed", String(isActive));
   }
 }
 
@@ -41,36 +54,35 @@ function handleTaskListClick(event) {
   if (!button || !elements.list.contains(button)) return;
 
   const action = button.dataset.action;
-  if (action !== "toggle" && action !== "delete") return;
+  if (!TASK_ACTIONS.has(action)) return;
 
   const card = button.closest("li[data-task-id]");
   if (!card) return;
 
-  const id = Number(card.dataset.taskId);
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    elements.message.textContent = "Некорректный идентификатор задачи";
+  const id = readTaskId(card);
+  if (id === null) {
+    showMessage("Некорректный идентификатор задачи");
     return;
   }
 
   let result;
   if (action === "toggle") {
     const task = findTaskById(currentTasks, id);
-    if (!task) {
-      elements.message.textContent = "Задача не найдена";
-      return;
-    }
-    result = setTaskCompleted(currentTasks, id, !task.completed);
+    // Отсутствующую задачу сервис тоже отклонит, но так сообщение точнее.
+    result = task
+      ? setTaskCompleted(currentTasks, id, !task.completed)
+      : { ok: false, error: `Задача с id ${id} не найдена` };
   } else {
     result = removeTask(currentTasks, id);
   }
 
   if (!result.ok) {
-    elements.message.textContent = result.error;
+    showMessage(result.error);
     return;
   }
 
   currentTasks = result.tasks;
-  elements.message.textContent = "";
+  showMessage();
   renderApp();
   restoreTaskFocus(id, action);
 }
@@ -82,10 +94,10 @@ function handleFilterClick(event) {
   if (!button || !elements.filters.contains(button)) return;
 
   const filter = button.dataset.filter;
-  if (filter !== "all" && filter !== "pending" && filter !== "completed") return;
+  if (!FILTERS.has(filter)) return;
 
   currentFilter = filter;
-  elements.message.textContent = "";
+  showMessage();
   renderApp();
 }
 
@@ -103,6 +115,6 @@ elements.filters.addEventListener("click", handleFilterClick);
 try {
   renderApp();
 } catch (error) {
-  elements.message.textContent = `Ошибка запуска: ${error.message}`;
+  showMessage(`Ошибка запуска: ${error.message}`);
   console.error(error);
 }

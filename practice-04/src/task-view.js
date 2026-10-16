@@ -1,73 +1,79 @@
 import { getTaskStats } from "./task-service.js";
 
+// Здесь создаётся DOM, но не изменяется состояние приложения.
+
 const PRIORITY_LABELS = { low: "Низкий", medium: "Средний", high: "Высокий" };
+
+function createTextElement(tagName, className, text) {
+  const element = document.createElement(tagName);
+  element.className = className;
+  element.textContent = text; // всегда текст, а не HTML
+  return element;
+}
 
 function createActionButton(action, label) {
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.action = action;
-  const span = document.createElement("span");
-  span.className = "action-label";
-  span.textContent = label;
-  button.append(span);
+  button.append(createTextElement("span", "action-label", label));
   return button;
 }
 
 export function createTaskElement(task) {
-  const li = document.createElement("li");
-  li.className = "task-card";
-  li.dataset.taskId = String(task.id);
-  if (task.completed) li.classList.add("is-completed");
+  const card = document.createElement("li");
+  card.className = "task-card";
+  card.classList.toggle("is-completed", task.completed);
+  card.dataset.taskId = String(task.id);
 
-  const title = document.createElement("h3");
-  title.className = "task-title";
-  title.textContent = task.title;
-
-  const status = document.createElement("span");
-  status.className = "task-status";
-  status.textContent = task.completed ? "Выполнена" : "В работе";
-
-  const priority = document.createElement("span");
-  priority.className = "task-priority";
-  priority.textContent = PRIORITY_LABELS[task.priority] ?? task.priority;
+  const toggle = createActionButton("toggle", "Выполнена"); // подпись постоянная
+  toggle.setAttribute("aria-pressed", String(task.completed));
 
   const actions = document.createElement("div");
   actions.className = "task-actions";
+  actions.append(
+    toggle,
+    createActionButton("edit", "Изменить"),
+    createActionButton("delete", "Удалить"),
+  );
 
-  const toggle = createActionButton("toggle", "Выполнена");
-  toggle.setAttribute("aria-pressed", task.completed ? "true" : "false");
-
-  const edit = createActionButton("edit", "Изменить");
-  const del  = createActionButton("delete", "Удалить");
-
-  actions.append(toggle, edit, del);
-  li.append(title, status, priority, actions);
-  return li;
+  card.append(
+    createTextElement("h3", "task-title", task.title),
+    createTextElement("span", "task-status", task.completed ? "Выполнена" : "В работе"),
+    createTextElement("span", "task-priority", PRIORITY_LABELS[task.priority] ?? task.priority),
+    actions,
+  );
+  return card;
 }
 
 export function renderTaskList(listElement, tasks) {
-  const cards = tasks.map((task) => createTaskElement(task));
   // Сам listElement сохраняется — обработчик на нём остаётся живым.
-  listElement.replaceChildren(...cards);
+  listElement.replaceChildren(...tasks.map(createTaskElement));
 }
 
 export function renderSummary(summaryElement, tasks, visibleCount) {
-  const stats = getTaskStats(tasks);
-  summaryElement.querySelector('[data-stat="total"]').textContent = String(stats.total);
-  summaryElement.querySelector('[data-stat="completed"]').textContent = String(stats.completed);
-  summaryElement.querySelector('[data-stat="pending"]').textContent = String(stats.pending);
-  summaryElement.querySelector('[data-stat="progress"]').textContent = `${stats.progress.toFixed(1)}%`;
-  summaryElement.querySelector('[data-stat="visible"]').textContent = String(visibleCount);
+  const { total, completed, pending, progress } = getTaskStats(tasks);
+  const values = {
+    total,
+    completed,
+    pending,
+    progress: `${progress.toFixed(1)}%`,
+    visible: visibleCount,
+  };
+
+  for (const [stat, value] of Object.entries(values)) {
+    summaryElement.querySelector(`[data-stat="${stat}"]`).textContent = String(value);
+  }
 }
 
 export function renderEmptyState(messageElement, total, visibleCount) {
-  if (visibleCount > 0) {
-    messageElement.hidden = true;
+  const isEmpty = visibleCount === 0;
+  messageElement.hidden = !isEmpty;
+
+  if (!isEmpty) {
     messageElement.textContent = "";
-    return;
+  } else if (total === 0) {
+    messageElement.textContent = "Список задач пуст.";
+  } else {
+    messageElement.textContent = "Нет задач по выбранному фильтру.";
   }
-  messageElement.hidden = false;
-  messageElement.textContent = total === 0
-    ? "Список задач пуст."
-    : "Нет задач по выбранному фильтру.";
 }

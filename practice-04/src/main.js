@@ -49,7 +49,7 @@ try {
   loaded = {
     ok: false,
     source: "fallback",
-    tasks: initialTasks.map((task) => ({ ...task })),
+    tasks: copyInitialTasks(),
     error: `Хранилище не инициализировано: ${error.message}`,
   };
   console.error(error);
@@ -57,6 +57,23 @@ try {
 let currentTasks = loaded.tasks;
 let currentFilter = "all";
 let editingId = null;
+
+const FILTERS = new Set(["all", "pending", "completed"]);
+const TASK_ACTIONS = new Set(["toggle", "edit", "delete"]);
+
+function showMessage(text = "") {
+  elements.message.textContent = text;
+}
+
+function copyInitialTasks() {
+  return initialTasks.map((task) => ({ ...task }));
+}
+
+// Идентификатор из DOM — строка; преобразуется и проверяется на границе обработчика.
+function readTaskId(card) {
+  const id = Number(card.dataset.taskId);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
 
 elements.datasetLabel.textContent = isVariant
   ? `Индивидуальный вариант: ${variantNumber ?? "не указан"}`
@@ -80,7 +97,7 @@ function renderApp() {
   for (const button of elements.filters.querySelectorAll("button[data-filter]")) {
     const isActive = button.dataset.filter === currentFilter;
     button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    button.setAttribute("aria-pressed", String(isActive));
   }
 }
 
@@ -131,7 +148,7 @@ function setFormMode(id = null) {
 
   const task = findTaskById(currentTasks, id);
   if (!task) {
-    elements.message.textContent = "Задача не найдена";
+    showMessage(`Задача с id ${id} не найдена`);
     return;
   }
 
@@ -153,8 +170,8 @@ function persistCurrentTasks(successMessage) {
   elements.storageStatus.classList.toggle("is-warning", !saved.ok);
   elements.storageStatus.textContent = saved.ok
     ? "Изменения сохранены в localStorage."
-    : saved.error;
-  elements.message.textContent = saved.ok ? successMessage : `${successMessage} ${saved.error}`;
+    : `${saved.error} Изменения действуют только до перезагрузки страницы.`;
+  showMessage(saved.ok ? successMessage : `${successMessage} ${saved.error}`);
   renderApp();
   return saved;
 }
@@ -185,6 +202,7 @@ function handleFormSubmit(event) {
     return;
   }
 
+  // Даже после проверки формы данные защищает сервисная операция.
   const { id, title, priority } = validation.value;
   const wasEditing = editingId !== null;
   const result = wasEditing
@@ -197,7 +215,7 @@ function handleFormSubmit(event) {
   }
 
   currentTasks = result.tasks;
-  setFormMode();                                  // сбрасывает editingId
+  setFormMode(); // сбрасывает editingId и очищает форму
   persistCurrentTasks(wasEditing ? "Задача обновлена." : "Задача добавлена.");
 }
 
@@ -208,48 +226,42 @@ function handleTaskListClick(event) {
   if (!button || !elements.list.contains(button)) return;
 
   const action = button.dataset.action;
+  if (!TASK_ACTIONS.has(action)) return; // неизвестное действие игнорируется
+
   const card = button.closest("li[data-task-id]");
   if (!card) return;
 
-  const id = Number(card.dataset.taskId);
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    elements.message.textContent = "Некорректный идентификатор задачи";
+  const id = readTaskId(card);
+  if (id === null) {
+    showMessage("Некорректный идентификатор задачи");
     return;
   }
 
+  // edit только переключает форму и не пишет в storage.
   if (action === "edit") {
     setFormMode(id);
     return;
   }
 
+  let result;
   if (action === "toggle") {
     const task = findTaskById(currentTasks, id);
-    if (!task) {
-      elements.message.textContent = "Задача не найдена";
-      return;
-    }
-    const result = setTaskCompleted(currentTasks, id, !task.completed);
-    if (!result.ok) {
-      elements.message.textContent = result.error;
-      return;
-    }
-    currentTasks = result.tasks;
-    persistCurrentTasks("Статус задачи изменён.");
-    restoreTaskFocus(id, action);
+    result = task
+      ? setTaskCompleted(currentTasks, id, !task.completed)
+      : { ok: false, error: `Задача с id ${id} не найдена` };
+  } else {
+    result = removeTask(currentTasks, id);
+  }
+
+  if (!result.ok) {
+    showMessage(result.error);
     return;
   }
 
-  if (action === "delete") {
-    const result = removeTask(currentTasks, id);
-    if (!result.ok) {
-      elements.message.textContent = result.error;
-      return;
-    }
-    currentTasks = result.tasks;
-    if (editingId === id) setFormMode();
-    persistCurrentTasks("Задача удалена.");
-    restoreTaskFocus(id, action);
-  }
+  currentTasks = result.tasks;
+  if (action === "delete" && editingId === id) setFormMode();
+  persistCurrentTasks(action === "toggle" ? "Статус задачи изменён." : "Задача удалена.");
+  restoreTaskFocus(id, action);
 }
 
 function handleFilterClick(event) {
@@ -259,20 +271,21 @@ function handleFilterClick(event) {
   if (!button || !elements.filters.contains(button)) return;
 
   const filter = button.dataset.filter;
-  if (filter !== "all" && filter !== "pending" && filter !== "completed") return;
+  if (!FILTERS.has(filter)) return;
 
-  currentFilter = filter;
-  elements.message.textContent = "";
+  currentFilter = filter; // фильтр — состояние интерфейса, в storage не пишется
+  showMessage();
   renderApp();
 }
 
 function handleResetClick() {
   const result = removeSavedTasks(window.localStorage, storageKey);
 
-  currentTasks = initialTasks.map((task) => ({ ...task }));
+  // Исходный набор сразу обратно не сохраняется: ключ должен остаться отсутствующим.
+  currentTasks = copyInitialTasks();
   currentFilter = "all";
   setFormMode();
-  elements.message.textContent = "";
+  showMessage();
 
   if (result.ok) {
     elements.storageStatus.textContent = "Данные сброшены. Используется исходный набор.";
@@ -300,6 +313,6 @@ try {
   setFormMode();
   renderApp();
 } catch (error) {
-  elements.message.textContent = `Ошибка запуска: ${error.message}`;
+  showMessage(`Ошибка запуска: ${error.message}`);
   console.error(error);
 }

@@ -1,29 +1,37 @@
+// Граница localStorage: схема сохранённых данных, JSON и перехват исключений.
+// storage передаётся аргументом — модуль не обращается к глобальному localStorage.
+import { isValidId, isValidPriority, normalizeTitle } from "./task-service.js";
+
 export const STORAGE_VERSION = 1;
 
-const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
-
+// Сохранённая запись должна точно соответствовать модели:
+// при чтении ничего не нормализуется, неверные данные отклоняются целиком.
 function isValidTask(task) {
-  if (!task || typeof task !== "object") return false;
-  if (!Number.isSafeInteger(task.id) || task.id <= 0) return false;
-  if (typeof task.title !== "string") return false;
-  if (task.title !== task.title.trim()) return false;
-  if (task.title.length < 1 || task.title.length > 100) return false;
-  if (typeof task.completed !== "boolean") return false;
-  if (!ALLOWED_PRIORITIES.has(task.priority)) return false;
-  return true;
+  if (task === null || typeof task !== "object") return false;
+  const titleCheck = normalizeTitle(task.title);
+  return (
+    isValidId(task.id) &&
+    titleCheck.ok &&
+    titleCheck.title === task.title && // название уже должно быть очищено
+    typeof task.completed === "boolean" &&
+    isValidPriority(task.priority)
+  );
 }
 
 function copyTasks(tasks) {
   return tasks.map((task) => ({ ...task }));
 }
 
+function fallback(tasks, error) {
+  return { ok: false, source: "fallback", tasks, error };
+}
+
 export function isValidTaskList(value) {
   if (!Array.isArray(value)) return false;
-  const seen = new Set();
+  const seenIds = new Set();
   for (const task of value) {
-    if (!isValidTask(task)) return false;
-    if (seen.has(task.id)) return false;
-    seen.add(task.id);
+    if (!isValidTask(task) || seenIds.has(task.id)) return false;
+    seenIds.add(task.id);
   }
   return true;
 }
@@ -35,25 +43,17 @@ export function loadTasks(storage, key, fallbackTasks) {
     if (raw === null) {
       return { ok: true, source: "initial", tasks: fallbackCopy };
     }
+
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || parsed.version !== STORAGE_VERSION) {
-      return {
-        ok: false, source: "fallback", tasks: fallbackCopy,
-        error: "Неизвестная версия или формат сохранённых данных",
-      };
+    if (parsed === null || typeof parsed !== "object" || parsed.version !== STORAGE_VERSION) {
+      return fallback(fallbackCopy, "Неизвестная версия или формат сохранённых данных. Используется исходный набор.");
     }
     if (!isValidTaskList(parsed.tasks)) {
-      return {
-        ok: false, source: "fallback", tasks: fallbackCopy,
-        error: "Сохранённые задачи повреждены",
-      };
+      return fallback(fallbackCopy, "Сохранённые задачи повреждены. Используется исходный набор.");
     }
     return { ok: true, source: "storage", tasks: copyTasks(parsed.tasks) };
   } catch (error) {
-    return {
-      ok: false, source: "fallback", tasks: fallbackCopy,
-      error: `Ошибка чтения: ${error.message}`,
-    };
+    return fallback(fallbackCopy, `Не удалось прочитать сохранённые данные (${error.message}). Используется исходный набор.`);
   }
 }
 
@@ -74,6 +74,6 @@ export function removeSavedTasks(storage, key) {
     storage.removeItem(key);
     return { ok: true };
   } catch (error) {
-    return { ok: false, error: `Не удалось удалить: ${error.message}` };
+    return { ok: false, error: `Не удалось удалить сохранённые данные: ${error.message}` };
   }
 }

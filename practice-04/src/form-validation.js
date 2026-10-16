@@ -1,50 +1,51 @@
-const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
+// Чистая проверка черновика формы: без DOM, без сообщений на странице
+// и без изменения входных значений. Правила модели берутся из task-service.js.
+import { MAX_TITLE_LENGTH, isValidId, isValidPriority, normalizeTitle } from "./task-service.js";
 
-function parseId(rawId) {
+// Значение поля формы обычно строка (FormData), но допускается и число.
+// Пустая строка не должна превратиться в 0, null/undefined — тоже отказ.
+function parseFormId(rawId) {
   if (typeof rawId === "string" && rawId.trim() === "") return null;
+  if (typeof rawId !== "string" && typeof rawId !== "number") return null;
   const id = Number(rawId);
-  if (!Number.isSafeInteger(id) || id <= 0) return null;
-  return id;
+  return isValidId(id) ? id : null;
 }
 
-function parseTitle(rawTitle) {
-  if (typeof rawTitle !== "string") return null;
-  const title = rawTitle.trim();
-  if (title.length < 1 || title.length > 100) return null;
-  return title;
+function validateId(draft, tasks, editingId) {
+  const exists = (id) => tasks.some((task) => task.id === id);
+
+  if (editingId !== null) {
+    // В режиме редактирования поле id заблокировано; источник — editingId.
+    if (!isValidId(editingId)) return { error: "Некорректный идентификатор редактируемой задачи" };
+    if (!exists(editingId)) return { error: "Редактируемая задача не найдена" };
+    return { value: editingId };
+  }
+
+  const id = parseFormId(draft.id);
+  if (id === null) return { error: "Введите положительное целое число" };
+  if (exists(id)) return { error: "Задача с таким идентификатором уже существует" };
+  return { value: id };
 }
 
 export function validateTaskDraft(draft, tasks, editingId = null) {
   const errors = {};
-  const isEditing = editingId !== null;
 
-  let id;
-  if (isEditing) {
-    if (!Number.isSafeInteger(editingId) || editingId <= 0) {
-      errors.id = "Некорректный идентификатор редактируемой задачи";
-    } else if (!tasks.some((t) => t.id === editingId)) {
-      errors.id = "Редактируемая задача не найдена";
-    } else {
-      id = editingId;
-    }
-  } else {
-    id = parseId(draft.id);
-    if (id === null) {
-      errors.id = "Введите положительное целое число";
-    } else if (tasks.some((t) => t.id === id)) {
-      errors.id = "Задача с таким идентификатором уже существует";
-    }
+  const idCheck = validateId(draft, tasks, editingId);
+  if (idCheck.error) errors.id = idCheck.error;
+
+  const titleCheck = normalizeTitle(draft.title);
+  if (!titleCheck.ok) {
+    errors.title = `Название должно быть строкой от 1 до ${MAX_TITLE_LENGTH} символов`;
   }
 
-  const title = parseTitle(draft.title);
-  if (title === null) {
-    errors.title = "Название должно быть строкой от 1 до 100 символов";
-  }
-
-  if (typeof draft.priority !== "string" || !ALLOWED_PRIORITIES.has(draft.priority)) {
+  if (!isValidPriority(draft.priority)) {
     errors.priority = "Приоритет должен быть low, medium или high";
   }
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
-  return { ok: true, value: { id, title, priority: draft.priority } };
+
+  return {
+    ok: true,
+    value: { id: idCheck.value, title: titleCheck.title, priority: draft.priority },
+  };
 }
